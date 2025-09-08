@@ -1,0 +1,144 @@
+#!/bin/csh X
+
+# do_split  yymmdd.start  yymmdd.end  outdir=process splitdir=split
+
+set start = $argv[1]  
+set stop  = $argv[2]  
+
+echo "-----------------------------"
+echo "  Number of arguments: $#argv    "
+set yr   = `echo $start | awk '{printf "%.2s", $1}'`
+set year = 20$yr
+echo "  Year for data  : [$year]    "
+echo "-----------------------------"
+
+if ($#argv > 2) then
+  set outdir = ($argv[3])
+else
+  set outdir = (process)
+endif
+
+if ($#argv > 3) then
+  set split = ($argv[4])
+else
+  set split = (split)
+endif
+
+#set dumm  = (`ls -d1 ~/tapajos/km67data//20$yr/?????? ` )
+set dumm  = (`ls -d1 /media/ncoupe/seagate/Data/tapajos/km67data//20$yr/?????? ` ) 
+set files = ($dumm:gt )  
+set pdir  = (/media/ncoupe/seagate/Data/tapajos/km67data/20$yr)  
+#set pdir  = (~/tapajos/km67data/20$yr)  
+
+set dtype   = ("PF" "GD" "EB" "EA") 
+set nums    = (3 4 2 1) 
+set counter = (1 2 3 4) 
+
+echo "--------------------------------------------"   
+echo "  Processing data between $start and $stop "   
+echo "--------------------------------------------"   
+
+foreach file ($files)  
+
+  cd $pdir  
+
+#-------------------------------------------------------------------------------------------
+#                               Selects requested data files
+#-------------------------------------------------------------------------------------------
+  if ($file >= $start && $file <= $stop) then 
+    echo ""
+    echo "-------------------------"
+    echo "  Processing date $file "  
+    echo "-------------------------"  
+
+#-------------------------------------------------------------------------------------------
+#                                       Splits data
+#-------------------------------------------------------------------------------------------
+ cd $file   
+ foreach ltp ($counter)  
+  set dt = $dtype[$ltp]  
+  set itype = $nums[$ltp]  
+  echo "  File type:  $dt  and type flag $itype "  
+  echo " "   
+  echo " "   
+  echo "  Split the raw data files for $dt "  
+  if (-e $file$dt.DAT.gz) then 
+     echo "  Uncompressing the raw dat files..."
+     mv $file$dt.DAT.gz $file$dt.dat.gz
+     zcat  $file$dt.dat.gz > $file$dt.dat
+  else 
+     if (-e $file$dt.dat.gz) then
+       echo "  Uncompressing the raw dat files..."
+       zcat  $file$dt.dat.gz > $file$dt.dat
+     endif
+     if (-e $file$dt.DAT) then 
+       echo "  No *.gz to unzip, but found the dat files    "
+       mv $file$dt.DAT $file$dt.dat
+     endif
+     if (-e $file$dt.dat ) then 
+       echo "  No *.gz to unzip, but found the dat files   "
+     else
+       echo "  $file$dt.dat.gz is not available." 
+       echo "  Skipping this dataset."
+       goto ENDLOOP
+    endif  
+  endif
+
+    if ( ! -e $split) then 
+       mkdir $split 
+    endif  
+    if ( ! -e $outdir) then 
+       mkdir $outdir 
+    endif  
+
+    if($dt == "EB") then 
+      echo "  check1: ~/tapajos/fortran/lsplit7.eddy $file -files $itype -split $split -dirout $outdir    "
+      ~/tapajos/fortran/lsplit7.eddy $file -files $itype -split $split -dirout $outdir  
+    else 
+      if ($dt == "EA") then 
+       echo "  check1: ~/tapajos/fortran/lsplit7.eddy $file -files $itype -split $split -dirout $outdir    "
+       ~/tapajos/fortran/lsplit7.eddy $file -files $itype -split $split -dirout $outdir 
+      else
+       echo "  check2: ~/tapajos/fortran/lsplit7 $file -files $itype -split $split -dirout $outdir    "
+       ~/tapajos/fortran/lsplit7 $file -files $itype -split $split -dirout $outdir  
+      endif
+     endif 
+
+#-------------------------------------------------------------------------------------------
+# If *.dat files are not already zipped, zip them
+#-------------------------------------------------------------------------------------------
+      if (! -e $file$dt.dat.gz) then 
+	gzip $file$dt.dat
+      endif  
+      if (-e $file$dt.dat.gz) then 
+         echo "  Removing the uncompressed raw data files..."
+         echo " " 
+	   rm  $file$dt.dat
+         echo "  Done."
+      endif
+ENDLOOP:
+    end  
+
+ENDDATA:   
+   cd $split 
+   echo "---------------------------------------------------"
+   echo "  Creating/Updating the L$file.split.zip file..."
+   echo "  Removing the *.20# files...                      "
+   echo ""
+   if (-e L$file.split.zip) then
+      zip -Du L$file.split.zip ??$file.20? 
+      rm ??$file.20?
+   else 
+      zip -D L$file.split.zip ??$file.20? 
+      rm ??$file.20?
+   endif
+
+   echo ""
+   echo "  End of LSplit processing for CO2 data for $file ."  
+   echo "-----------------------------------------------------"   
+   time
+   echo "-----------------------------------------------------" 
+   echo ""  
+  endif  
+
+end  

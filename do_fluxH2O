@@ -1,0 +1,220 @@
+#!/bin/csh 
+#  do_process_2011 yymmdd.start yymmdd.end outdir splitdir
+#  Processes data in /Tapajos/km67.H2O/yyyy/yymmdd.start to ./yymmdd.end.
+#  Leaves split files zipped at end.
+#  Need to change lpaths
+
+set start = $argv[1]  
+set stop  = $argv[2]  
+
+if ($#argv > 2) then
+set outdir = ($argv[3])
+else
+set outdir = (process)
+endif
+
+if ($#argv > 3) then
+set split = ($argv[4])
+else
+set split = (split)
+endif
+
+echo "-----------------------------"
+echo "  Number of arguments: $#argv    "
+set yr   = `echo $start | awk '{printf "%.2s", $1}'`
+set year = 20$yr
+echo "  Year for data  : [$year]    "
+echo "-----------------------------"
+
+
+#  set dumm  = (`ls -d1 ~/tapajos/km67.H2O//20$yr/$yr???? ` ) 
+set dumm  = (`ls -d1 /media/ncoupe/seagate/Data/tapajos/km67.H2O//20$yr/$yr???? ` )  
+set files = ($dumm:gt )  
+set pdir  = (/media/ncoupe/seagate/Data/tapajos/km67.H2O/20$yr)
+#  set pdir  = (~/tapajos/km67.H2O/20$yr)
+
+echo "  Running do_flux:"
+echo "  Processing data for folders $start to $stop ."
+echo " "
+
+foreach file ($files)
+
+cd $pdir  
+
+#---------------------------------------------------------------------------------------------------
+# Selects requested data.
+#---------------------------------------------------------------------------------------------------
+if ($file >= $start && $file <= $stop) then 
+echo " "  
+echo " Processing folder $file ..."  
+
+#---------------------------------------------------------------------------------------------------
+# Splits data.
+#---------------------------------------------------------------------------------------------------
+cd $file/$split 
+if( -e PF$file.201 ) then 
+echo "  Split data files found."
+else 
+if (-e L$file.split.zip) then 
+nice unzip -u L$file.split.zip 
+echo "  Unzipping the split data files..."
+else     
+echo "  Error found: L$file.split.zip is not available." 
+echo "  Skipping this dataset..."  
+echo "" 
+goto ENDDATA  
+endif
+endif  
+
+if ( ! -e $pdir/$file/$outdir) then 
+mkdir $pdir/$file/$outdir 
+endif  
+cd $pdir/$file/$outdir 
+
+#---------------------------------------------------------------------------------------------------
+# Calibration
+#---------------------------------------------------------------------------------------------------
+
+# Profile calibration:
+# Checks to see if Lsplit terminated correctly.
+
+echo ""
+echo "  Calibration calculations started."
+if (-e ../$split/PF$file.201) then 
+echo "  Running profile calibration codes..."
+nice  ~/tapajos/fortran/lcalpf7 $file  -dirout $outdir -split $split 
+echo ""  
+else   
+echo "  Error found: profile data file PF$file.201 not found." 
+echo "  Skipping to process Eddy calibrations..."  
+endif  
+
+# Eddy2 calibration:
+# Checks to see if Lsplit terminated correctly.
+
+if (-e ../$split/EA$file.200) then 
+echo "  Running Eddy 1 (EA) calibration code..."
+nice  ~/tapajos/fortran/lcaled7 $file -files 1  -dirout $outdir -split $split
+echo ""
+else
+echo "  Warning: Eddy 1 (EA) data file EA$file.200 not found."
+echo "  Skipping to aggregation routines..."
+endif
+
+if (-e ../$split/EB$file.200) then 
+echo "  Running Eddy 2 (EB) calibration code..."
+nice  ~/tapajos/fortran/lcaled7 $file -files 2  -dirout $outdir -split $split
+echo ""
+else
+echo "  Warning: Eddy 2 (EB) data file EB$file.200 not found."
+echo "  Skipping to aggregation routines..."
+endif
+
+#---------------------------------------------------------------------------------------------------
+# Aggregation
+#---------------------------------------------------------------------------------------------------
+
+# Profile aggregation:
+echo ""
+echo "  Aggregation calculations started."
+if (-e ../$split/PF$file.201) then 
+echo "  Running Profile (PF) housekeeping aggregation code..."
+nice  ~/tapajos/fortran/laggr7 $file -files 3   -dirout $outdir -split $split 
+echo " " 
+else   
+echo "  Error found: Profile climate data file - PF$file.201 - does not exist."
+echo "  Skipping to Ground (GD) aggregation calculations..."  
+echo " "
+endif  
+
+# Ground aggregation:
+if (-e ../$split/GD$file.201) then 
+echo "  Running Ground data (GD) housekeeping aggregation code..."
+nice  ~/tapajos/fortran/laggr7 $file -files 4  -dirout $outdir -split $split 
+echo ""
+else   
+echo "  Error found: Ground data file - GD$file.201 - does not exist."
+echo "  Skip to Sonic calculations..."
+echo ""
+endif  
+
+# Eddy aggregation (low-frequency data 0.5 Hz):
+if (-e ../$split/EA$file.201) then
+echo "  Running Eddy 2 (EA) housekeeping aggregation code."
+# nice  ~/tapajos/fortran/laggred7 $file -file 2 -minutes 1 -dirout $outdir -split $split
+nice  ~/tapajos/fortran/laggred7 $file -file 1 1 -dirout $outdir -split $split
+echo ""
+else
+echo "  Warning: Eddy 2 (EA) slow data file - EA$file.201 - does not exist."
+echo "  Skip to Ground data aggregation routines  "
+endif
+
+# Eddy aggregation (low-frequency data 0.5 Hz):
+if (-e ../$split/EB$file.201) then
+echo "  Running Eddy 2 (EB) housekeeping aggregation code."
+# nice  ~/tapajos/fortran/laggred7 $file -file 2 -minutes 1 -dirout $outdir -split $split
+nice  ~/tapajos/fortran/laggred7 $file -file 2 1 -dirout $outdir -split $split
+echo ""
+else
+echo "  Warning: Eddy 2 (EB) slow data file - EB$file.201 - does not exist."
+echo "  Skip to Ground data aggregation routines  "
+endif
+
+#---------------------------------------------------------------------------------------------------
+# Flux calculations
+#---------------------------------------------------------------------------------------------------
+
+# CO2 Flux: 
+echo ""
+echo "  CO2 flux calculations started."
+if(-e ../$split/EA$file.200 && -e ../$split/EA$file.201) then
+echo "  Running Eddy 2 (EA) flux calculations..."
+~/tapajos/fortran/lflux7 $file -files 1 -filter 11110 -dirin $outdir -dirout $outdir -split $split 
+else
+echo "  Warning: Missing *.200 and/or *.201 files. Skipping processing..."
+endif
+echo ""
+
+# CO2 Flux: 
+echo ""
+echo "  CO2 flux calculations started."
+if(-e ../$split/EB$file.200 && -e ../$split/EB$file.201) then
+echo "  Running Eddy 2 (EB) flux calculations..."
+~/tapajos/fortran/lflux7 $file -files 2 -filter 11110 -dirin $outdir -dirout $outdir -split $split 
+else
+echo "  Warning: Missing *.200 and/or *.201 files. Skipping processing..."
+endif
+echo ""
+
+ENDDATA:   
+echo ""
+echo "  Creating/Updating the L$file.split.zip file..."
+echo "  Removing the *.20? files..."
+echo ""
+cd $pdir/$file/$split 
+if (-e L$file.split.zip) then
+nice zip -Du L$file.split.zip ??$file.20?
+rm ??$file.20?
+else
+nice zip -D L$file.split.zip ??$file.20?
+rm ??$file.20?
+endif
+
+echo " "
+echo "  Removing old *.gz data files..."
+echo " "
+cd $pdir/$file/$outdir 
+nice rm -f *.gz
+echo "  Compressing the resultant data files..."
+echo " "
+cd $pdir/$file/$outdir 
+nice gzip -f [E-S]?$file.*
+
+echo " "  
+echo "  do_flux script finished for folders $start to $stop."
+echo "  End Processing of CO2 data for $file ."
+echo " "
+time   
+endif  
+
+end  
